@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"runtime"
 	"sync"
@@ -90,9 +91,6 @@ type dnsOverQUIC struct {
 	timeout time.Duration
 }
 
-// type check
-var _ Upstream = (*dnsOverQUIC)(nil)
-
 // newDoQ returns the DNS-over-QUIC Upstream.
 func newDoQ(addr *url.URL, opts *Options) (u Upstream, err error) {
 	addPort(addr, defaultPortDoQ)
@@ -133,6 +131,9 @@ func newDoQ(addr *url.URL, opts *Options) (u Upstream, err error) {
 
 	return u, nil
 }
+
+// type check
+var _ Upstream = (*dnsOverQUIC)(nil)
 
 // Address implements the [Upstream] interface for *dnsOverQUIC.
 func (p *dnsOverQUIC) Address() string { return p.addr.String() }
@@ -502,4 +503,17 @@ func (p *dnsOverQUIC) withDeadline(
 	}
 
 	return ctx, cancel
+}
+
+// type check
+var _ UpstreamResolver = (*dnsOverQUIC)(nil)
+
+// AsResolver implements the [isBootstrapper] interface for *plainDNS.
+func (p *dnsOverQUIC) AsResolver() (r Resolver, err error) {
+	_, err = netip.ParseAddr(p.addr.Hostname())
+	if err != nil {
+		return nil, err
+	}
+
+	return upstreamResolver{Upstream: p}, nil
 }

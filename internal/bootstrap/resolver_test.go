@@ -31,7 +31,7 @@ func TestLookupParallel(t *testing.T) {
 	const hostname = "host.name"
 
 	t.Run("no_resolvers", func(t *testing.T) {
-		addrs, err := bootstrap.LookupParallel(context.Background(), nil, "")
+		addrs, err := bootstrap.ParallelResolver(nil).LookupNetIP(context.Background(), "ip", "")
 		assert.ErrorIs(t, err, bootstrap.ErrNoResolvers)
 		assert.Nil(t, addrs)
 	})
@@ -49,9 +49,9 @@ func TestLookupParallel(t *testing.T) {
 	}
 
 	t.Run("one_resolver", func(t *testing.T) {
-		addrs, err := bootstrap.LookupParallel(
+		addrs, err := bootstrap.ParallelResolver{immediate}.LookupNetIP(
 			context.Background(),
-			[]bootstrap.Resolver{immediate},
+			"ip",
 			hostname,
 		)
 		require.NoError(t, err)
@@ -72,9 +72,9 @@ func TestLookupParallel(t *testing.T) {
 			},
 		}
 
-		addrs, err := bootstrap.LookupParallel(
+		addrs, err := bootstrap.ParallelResolver{immediate, delayed}.LookupNetIP(
 			context.Background(),
-			[]bootstrap.Resolver{immediate, delayed},
+			"ip",
 			hostname,
 		)
 		require.NoError(t, err)
@@ -93,9 +93,9 @@ func TestLookupParallel(t *testing.T) {
 			},
 		}
 
-		addrs, err := bootstrap.LookupParallel(
+		addrs, err := bootstrap.ParallelResolver{r, r, r}.LookupNetIP(
 			context.Background(),
-			[]bootstrap.Resolver{r, r, r},
+			"ip",
 			hostname,
 		)
 		testutil.AssertErrorMsg(t, wantErrMsg, err)

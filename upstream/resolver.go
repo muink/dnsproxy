@@ -11,10 +11,19 @@ import (
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/log"
 	"github.com/miekg/dns"
+	"golang.org/x/exp/slices"
 )
 
 // Resolver is an alias for [bootstrap.Resolver] to avoid the import cycle.
 type Resolver = bootstrap.Resolver
+
+// UpstreamResolver is an interface extension for [Upstream] that may appear
+// usable as [Resolver] without bootstrap.
+type UpstreamResolver interface {
+	// AsResolver returns a [Resolver] made of upstream, but only in case the
+	// latter doesn't need bootstrap.
+	AsResolver() (r Resolver, err error)
+}
 
 // NewUpstreamResolver creates an upstream that can be used as [Resolver].
 // resolverAddress format is the same as in the [AddressToUpstream], except that
@@ -31,47 +40,21 @@ func NewUpstreamResolver(resolverAddress string, opts *Options) (r Resolver, err
 		upsOpts.PreferIPv6 = opts.PreferIPv6
 	}
 
-	ur := upstreamResolver{}
-
-	ur.Upstream, err = AddressToUpstream(resolverAddress, upsOpts)
+	ups, err := AddressToUpstream(resolverAddress, upsOpts)
 	if err != nil {
 		err = fmt.Errorf("creating upstream: %w", err)
 		log.Error("upstream bootstrap: %s", err)
 
-		return ur, err
+		return r, err
 	}
 
-	if err = validateBootstrap(ur.Upstream); err != nil {
-		log.Error("upstream bootstrap %s: %s", resolverAddress, err)
-
-		ur.Upstream = nil
-
-		return ur, err
+	if b, ok := ups.(UpstreamResolver); !ok {
+		err = fmt.Errorf("unknown upstream type: %T", ups)
+	} else if r, err = b.AsResolver(); err != nil {
+		err = fmt.Errorf("bootstrap %s: %w", ups.Address(), err)
 	}
 
-	return ur, err
-}
-
-// validateBootstrap returns error if the upstream is not eligible to be a
-// bootstrap DNS server.  DNSCrypt is always okay.  Plain DNS, DNS-over-TLS,
-// DNS-over-HTTPS, and DNS-over-QUIC are okay only if those are defined by IP.
-func validateBootstrap(upstream Upstream) (err error) {
-	switch upstream := upstream.(type) {
-	case *dnsCrypt:
-		return nil
-	case *dnsOverTLS:
-		_, err = netip.ParseAddr(upstream.addr.Hostname())
-	case *dnsOverHTTPS:
-		_, err = netip.ParseAddr(upstream.addr.Hostname())
-	case *dnsOverQUIC:
-		_, err = netip.ParseAddr(upstream.addr.Hostname())
-	case *plainDNS:
-		_, err = netip.ParseAddr(upstream.addr.Hostname())
-	default:
-		err = fmt.Errorf("unknown upstream type: %T", upstream)
-	}
-
-	return errors.Annotate(err, "bootstrap %s: %w", upstream.Address())
+	return r, err
 }
 
 // upstreamResolver is a wrapper around Upstream that implements the
@@ -193,3 +176,49 @@ func (r upstreamResolver) resolveAsync(
 	resp, err := r.resolve(host, qtype)
 	resCh <- &resolveResult{resp: resp, err: err}
 }
+
+// StaticResolver is a resolver which always responds with an underlying slice
+// of IP addresses.
+type StaticResolver []netip.Addr
+
+// type check
+var _ Resolver = StaticResolver(nil)
+
+// LookupNetIP implements the [Resolver] interface for ipSliceResolver.
+func (r StaticResolver) LookupNetIP(
+	ctx context.Context,
+	network,
+	host string,
+) (addrs []netip.Addr, err error) {
+	return slices.Clone(r), nil
+}
+
+// ConsequentResolver is a slice of resolvers that are queried in order until
+// the first successful response.
+type ConsequentResolver []Resolver
+
+// type check
+var _ Resolver = ConsequentResolver(nil)
+
+// LookupNetIP implements the [Resolver] interface for consequentResolver.
+func (r ConsequentResolver) LookupNetIP(
+	ctx context.Context,
+	network,
+	host string,
+) (addrs []netip.Addr, err error) {
+	var errs []error
+	for _, res := range r {
+		addrs, err = res.LookupNetIP(ctx, network, host)
+		if err == nil {
+			return addrs, nil
+		}
+
+		errs = append(errs, err)
+	}
+
+	return nil, errors.Join(errs...)
+}
+
+// ParallelResolver is a slice of resolvers that are queried concurrently.  The
+// first successful response is returned.
+type ParallelResolver = bootstrap.ParallelResolver

@@ -76,15 +76,9 @@ type Options struct {
 	// CipherSuites is a custom list of TLSv1.2 ciphers.
 	CipherSuites []uint16
 
-	// Bootstrap is a list of DNS servers to be used to resolve
-	// DNS-over-HTTPS/DNS-over-TLS hostnames.  Plain DNS, DNSCrypt, or
-	// DNS-over-HTTPS/DNS-over-TLS with IP addresses (not hostnames) could be
-	// used.
-	Bootstrap []string
-
-	// List of IP addresses of the upstream DNS server.  If not empty, bootstrap
-	// DNS servers won't be used at all.
-	ServerIPAddrs []net.IP
+	// Bootstrap is used to resolve upstreams' hostnames.  Any DNSCrypt upstream
+	// as well as any upstreav defined by plain IP address could be used.
+	Bootstrap Resolver
 
 	// HTTPVersions is a list of HTTP versions that should be supported by the
 	// DNS-over-HTTPS client.  If not set, HTTP/1.1 and HTTP/2 will be used.
@@ -107,7 +101,6 @@ func (o *Options) Clone() (clone *Options) {
 	return &Options{
 		Bootstrap:                 o.Bootstrap,
 		Timeout:                   o.Timeout,
-		ServerIPAddrs:             o.ServerIPAddrs,
 		HTTPVersions:              o.HTTPVersions,
 		VerifyServerCertificate:   o.VerifyServerCertificate,
 		VerifyConnection:          o.VerifyConnection,
@@ -241,14 +234,13 @@ func parseStamp(upsURL *url.URL, opts *Options) (u Upstream, err error) {
 			host = stamp.ServerAddrStr
 		}
 
-		// Parse and add to options.
-		ip := net.ParseIP(host)
-		if ip == nil {
+		var ips [1]netip.Addr
+		ips[0], err = netip.ParseAddr(host)
+		if err != nil {
 			return nil, fmt.Errorf("invalid server stamp address %s", stamp.ServerAddrStr)
 		}
 
-		// TODO(e.burkov):  Append?
-		opts.ServerIPAddrs = []net.IP{ip}
+		opts.Bootstrap = StaticResolver(ips[:])
 	}
 
 	switch stamp.Proto {
@@ -309,37 +301,26 @@ type DialerInitializer func() (handler bootstrap.DialHandler, err error)
 // newDialerInitializer creates an initializer of the dialer that will dial the
 // addresses resolved from u using opts.
 func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer, err error) {
-	host, port, err := netutil.SplitHostPort(u.Host)
+	host, _, err := netutil.SplitHostPort(u.Host)
 	if err != nil {
 		return nil, fmt.Errorf("invalid address: %s: %w", u.Host, err)
 	}
 
-	if addrsLen := len(opts.ServerIPAddrs); addrsLen > 0 {
-		// Don't resolve the addresses of the server since those from the
-		// options should be used.
-		addrs := make([]string, 0, addrsLen)
-		for _, addr := range opts.ServerIPAddrs {
-			addrs = append(addrs, netutil.JoinHostPort(addr.String(), port))
-		}
-
-		handler := bootstrap.NewDialContext(opts.Timeout, addrs...)
-
-		return func() (bootstrap.DialHandler, error) { return handler, nil }, nil
-	} else if _, err = netip.ParseAddr(host); err == nil {
+	if _, err = netip.ParseAddr(host); err == nil {
 		// Don't resolve the address of the server since it's already an IP.
 		handler := bootstrap.NewDialContext(opts.Timeout, u.Host)
 
 		return func() (bootstrap.DialHandler, error) { return handler, nil }, nil
 	}
 
-	resolvers, err := newResolvers(opts)
-	if err != nil {
-		// Don't wrap the error since it's informative enough as is.
-		return nil, err
+	boot := opts.Bootstrap
+	if boot == nil {
+		// Use the default resolver for bootstrapping.
+		boot = net.DefaultResolver
 	}
 
 	var dialHandler atomic.Value
-	di = func() (h bootstrap.DialHandler, resErr error) {
+	return func() (h bootstrap.DialHandler, resErr error) {
 		// Check if the dial handler has already been created.
 		h, ok := dialHandler.Load().(bootstrap.DialHandler)
 		if ok {
@@ -350,7 +331,7 @@ func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer, err 
 		// resolve the upstream hostname at the same time.  Currently, the last
 		// successful value will be stored in dialHandler, but ideally we should
 		// resolve only once.
-		h, resolveErr := bootstrap.ResolveDialContext(u, opts.Timeout, resolvers, opts.PreferIPv6)
+		h, resolveErr := bootstrap.ResolveDialContext(u, opts.Timeout, boot, opts.PreferIPv6)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("creating dial handler: %w", resolveErr)
 		}
@@ -360,35 +341,5 @@ func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer, err 
 		}
 
 		return h, nil
-	}
-
-	return di, nil
-}
-
-// newResolvers prepares resolvers for bootstrapping.  If opts.Bootstrap is
-// empty, the only new [net.Resolver] will be returned.  Otherwise, the it will
-// be added for each occurrence of an empty string in [Options.Bootstrap].
-func newResolvers(opts *Options) (resolvers []Resolver, err error) {
-	bootstraps := opts.Bootstrap
-	if len(bootstraps) == 0 {
-		return []Resolver{&net.Resolver{}}, nil
-	}
-
-	resolvers = make([]Resolver, 0, len(bootstraps))
-	for _, boot := range bootstraps {
-		if boot == "" {
-			resolvers = append(resolvers, &net.Resolver{})
-
-			continue
-		}
-
-		r, rErr := NewUpstreamResolver(boot, opts)
-		if rErr != nil {
-			return nil, fmt.Errorf("preparing bootstrap resolver: %w", rErr)
-		}
-
-		resolvers = append(resolvers, r)
-	}
-
-	return resolvers, nil
+	}, nil
 }

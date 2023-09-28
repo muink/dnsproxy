@@ -53,8 +53,8 @@ func ParseUpstreamsConfig(upstreamConfig []string, options *upstream.Options) (*
 		options = &upstream.Options{}
 	}
 
-	if len(options.Bootstrap) > 0 {
-		log.Debug("Bootstraps: %v", options.Bootstrap)
+	if options.Bootstrap != nil {
+		log.Debug("using bootstrap: %#v", options.Bootstrap)
 	}
 
 	var upstreams []upstream.Upstream

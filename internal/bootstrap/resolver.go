@@ -23,19 +23,25 @@ var _ Resolver = &net.Resolver{}
 // ErrNoResolvers is returned when zero resolvers specified.
 const ErrNoResolvers errors.Error = "no resolvers specified"
 
-// LookupParallel performs lookup for IP address of host with all resolvers
-// concurrently.
-func LookupParallel(
+// ParallelResolver is a slice of resolvers that are queried concurrently.  The
+// first successful response is returned.
+type ParallelResolver []Resolver
+
+// type check
+var _ Resolver = ParallelResolver(nil)
+
+// LookupNetIP implements the [Resolver] interface for ParallelResolver.
+func (r ParallelResolver) LookupNetIP(
 	ctx context.Context,
-	resolvers []Resolver,
+	network string,
 	host string,
 ) (addrs []netip.Addr, err error) {
-	resolversNum := len(resolvers)
+	resolversNum := len(r)
 	switch resolversNum {
 	case 0:
 		return nil, ErrNoResolvers
 	case 1:
-		return lookup(ctx, resolvers[0], host)
+		return lookup(ctx, r[0], network, host)
 	default:
 		// Go on.
 	}
@@ -43,18 +49,20 @@ func LookupParallel(
 	// Size of channel must accommodate results of lookups from all resolvers,
 	// sending into channel will be block otherwise.
 	ch := make(chan *lookupResult, resolversNum)
-	for _, res := range resolvers {
-		go lookupAsync(ctx, res, host, ch)
+	for _, rslv := range r {
+		go lookupAsync(ctx, rslv, host, network, ch)
 	}
 
 	var errs []error
-	for range resolvers {
+	for range r {
 		result := <-ch
-		if result.err == nil {
-			return result.addrs, nil
+		if result.err != nil {
+			errs = append(errs, result.err)
+
+			continue
 		}
 
-		errs = append(errs, result.err)
+		return result.addrs, nil
 	}
 
 	// TODO(e.burkov):  Use [errors.Join] in Go 1.20.
@@ -69,10 +77,10 @@ type lookupResult struct {
 
 // lookupAsync tries to lookup for ip of host with r and sends the result into
 // resCh.  It's inteneded to be used as a goroutine.
-func lookupAsync(ctx context.Context, r Resolver, host string, resCh chan<- *lookupResult) {
+func lookupAsync(ctx context.Context, r Resolver, network string, host string, resCh chan<- *lookupResult) {
 	defer log.OnPanic("parallel lookup")
 
-	addrs, err := lookup(ctx, r, host)
+	addrs, err := lookup(ctx, r, network, host)
 	resCh <- &lookupResult{
 		err:   err,
 		addrs: addrs,
@@ -80,9 +88,9 @@ func lookupAsync(ctx context.Context, r Resolver, host string, resCh chan<- *loo
 }
 
 // lookup tries to lookup ip of host with r.
-func lookup(ctx context.Context, r Resolver, host string) (addrs []netip.Addr, err error) {
+func lookup(ctx context.Context, r Resolver, network string, host string) (addrs []netip.Addr, err error) {
 	start := time.Now()
-	addrs, err = r.LookupNetIP(ctx, "ip", host)
+	addrs, err = r.LookupNetIP(ctx, network, host)
 	elapsed := time.Since(start)
 	if err != nil {
 		log.Debug("parallel lookup: lookup for %s failed in %s: %s", host, elapsed, err)

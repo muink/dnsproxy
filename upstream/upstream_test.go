@@ -48,9 +48,14 @@ func TestUpstream_bootstrapTimeout(t *testing.T) {
 	require.NoError(t, err)
 	testutil.CleanupAndRequireSuccess(t, udpListener.Close)
 
+	rslv, err := NewUpstreamResolver(udpListener.LocalAddr().String(), &Options{
+		Timeout: timeout,
+	})
+	require.NoError(t, err)
+
 	// Create an upstream that uses this faulty bootstrap.
 	u, err := AddressToUpstream("tls://random-domain-name", &Options{
-		Bootstrap: []string{udpListener.LocalAddr().String()},
+		Bootstrap: rslv,
 		Timeout:   timeout,
 	})
 	require.NoError(t, err)
@@ -100,88 +105,98 @@ func TestUpstream_bootstrapTimeout(t *testing.T) {
 }
 
 func TestUpstreams(t *testing.T) {
+	googleRslv, err := NewUpstreamResolver("8.8.8.8:53", &Options{
+		Timeout: timeout,
+	})
+	require.NoError(t, err)
+	cloudflareRslv, err := NewUpstreamResolver("1.0.0.1:53", &Options{
+		Timeout: timeout,
+	})
+	require.NoError(t, err)
+
 	upstreams := []struct {
+		bootstrap Resolver
 		address   string
-		bootstrap []string
 	}{{
+		bootstrap: googleRslv,
 		address:   "8.8.8.8:53",
-		bootstrap: []string{"8.8.8.8:53"},
 	}, {
+		bootstrap: nil,
 		address:   "1.1.1.1",
-		bootstrap: []string{},
 	}, {
+		bootstrap: cloudflareRslv,
 		address:   "1.1.1.1",
-		bootstrap: []string{"1.0.0.1"},
 	}, {
+		bootstrap: nil,
 		address:   "tcp://1.1.1.1:53",
-		bootstrap: []string{},
 	}, {
+		bootstrap: nil,
 		address:   "94.140.14.14:5353",
-		bootstrap: []string{},
 	}, {
+		bootstrap: nil,
 		address:   "tls://1.1.1.1",
-		bootstrap: []string{},
 	}, {
+		bootstrap: nil,
 		address:   "tls://9.9.9.9:853",
-		bootstrap: []string{},
 	}, {
+		bootstrap: googleRslv,
 		address:   "tls://dns.adguard.com",
-		bootstrap: []string{"8.8.8.8:53"},
 	}, {
+		bootstrap: googleRslv,
 		address:   "tls://dns.adguard.com:853",
-		bootstrap: []string{"8.8.8.8:53"},
 	}, {
+		bootstrap: googleRslv,
 		address:   "tls://dns.adguard.com:853",
-		bootstrap: []string{"8.8.8.8"},
 	}, {
+		bootstrap: nil,
 		address:   "tls://one.one.one.one",
-		bootstrap: []string{},
 	}, {
+		bootstrap: googleRslv,
 		address:   "https://1dot1dot1dot1.cloudflare-dns.com/dns-query",
-		bootstrap: []string{"8.8.8.8:53"},
 	}, {
+		bootstrap: nil,
 		address:   "https://dns.google/dns-query",
-		bootstrap: []string{},
 	}, {
+		bootstrap: nil,
 		address:   "https://doh.opendns.com/dns-query",
-		bootstrap: []string{},
 	}, {
 		// AdGuard DNS (DNSCrypt)
+		bootstrap: nil,
 		address:   "sdns://AQIAAAAAAAAAFDE3Ni4xMDMuMTMwLjEzMDo1NDQzINErR_JS3PLCu_iZEIbq95zkSV2LFsigxDIuUso_OQhzIjIuZG5zY3J5cHQuZGVmYXVsdC5uczEuYWRndWFyZC5jb20",
-		bootstrap: []string{},
 	}, {
 		// AdGuard Family (DNSCrypt)
+		bootstrap: googleRslv,
 		address:   "sdns://AQIAAAAAAAAAFDE3Ni4xMDMuMTMwLjEzMjo1NDQzILgxXdexS27jIKRw3C7Wsao5jMnlhvhdRUXWuMm1AFq6ITIuZG5zY3J5cHQuZmFtaWx5Lm5zMS5hZGd1YXJkLmNvbQ",
-		bootstrap: []string{"8.8.8.8"},
 	}, {
 		// Cloudflare DNS (DNS-over-HTTPS)
+		bootstrap: googleRslv,
 		address:   "sdns://AgcAAAAAAAAABzEuMC4wLjGgENk8mGSlIfMGXMOlIlCcKvq7AVgcrZxtjon911-ep0cg63Ul-I8NlFj4GplQGb_TTLiczclX57DvMV8Q-JdjgRgSZG5zLmNsb3VkZmxhcmUuY29tCi9kbnMtcXVlcnk",
-		bootstrap: []string{"8.8.8.8:53"},
 	}, {
 		// Google (Plain)
+		bootstrap: nil,
 		address:   "sdns://AAcAAAAAAAAABzguOC44Ljg",
-		bootstrap: []string{},
 	}, {
 		// AdGuard DNS (DNS-over-TLS)
+		bootstrap: googleRslv,
 		address:   "sdns://AwAAAAAAAAAAAAAPZG5zLmFkZ3VhcmQuY29t",
-		bootstrap: []string{"8.8.8.8:53"},
 	}, {
 		// AdGuard DNS (DNS-over-QUIC)
+		bootstrap: googleRslv,
 		address:   "sdns://BAcAAAAAAAAAAAAXZG5zLmFkZ3VhcmQtZG5zLmNvbTo3ODQ",
-		bootstrap: []string{"8.8.8.8:53"},
 	}, {
 		// Cloudflare DNS (DNS-over-HTTPS)
+		bootstrap: nil,
 		address:   "https://1.1.1.1/dns-query",
-		bootstrap: []string{},
 	}, {
 		// AdGuard DNS (DNS-over-QUIC)
+		bootstrap: googleRslv,
 		address:   "quic://dns.adguard-dns.com",
-		bootstrap: []string{"1.1.1.1:53"},
 	}, {
 		// Google DNS (HTTP3)
+		bootstrap: nil,
 		address:   "h3://dns.google/dns-query",
-		bootstrap: []string{},
 	}}
+
 	for _, test := range upstreams {
 		t.Run(test.address, func(t *testing.T) {
 			u, err := AddressToUpstream(
@@ -197,7 +212,10 @@ func TestUpstreams(t *testing.T) {
 }
 
 func TestAddressToUpstream(t *testing.T) {
-	opt := &Options{Bootstrap: []string{"1.1.1.1"}}
+	cloudflareRslv, err := NewUpstreamResolver("1.1.1.1", nil)
+	require.NoError(t, err)
+
+	opt := &Options{Bootstrap: cloudflareRslv}
 
 	testCases := []struct {
 		addr string
@@ -275,23 +293,28 @@ func TestAddressToUpstream_bads(t *testing.T) {
 func TestUpstreamDoTBootstrap(t *testing.T) {
 	upstreams := []struct {
 		address   string
-		bootstrap []string
+		bootstrap string
 	}{{
 		address:   "tls://one.one.one.one/",
-		bootstrap: []string{"tls://1.1.1.1"},
+		bootstrap: "tls://1.1.1.1",
 	}, {
 		address:   "tls://one.one.one.one/",
-		bootstrap: []string{"https://1.1.1.1/dns-query"},
+		bootstrap: "https://1.1.1.1/dns-query",
 	}, {
 		address: "tls://one.one.one.one/",
 		// Cisco OpenDNS
-		bootstrap: []string{"sdns://AQAAAAAAAAAADjIwOC42Ny4yMjAuMjIwILc1EUAgbyJdPivYItf9aR6hwzzI1maNDL4Ev6vKQ_t5GzIuZG5zY3J5cHQtY2VydC5vcGVuZG5zLmNvbQ"},
+		bootstrap: "sdns://AQAAAAAAAAAADjIwOC42Ny4yMjAuMjIwILc1EUAgbyJdPivYItf9aR6hwzzI1maNDL4Ev6vKQ_t5GzIuZG5zY3J5cHQtY2VydC5vcGVuZG5zLmNvbQ",
 	}}
 
 	for _, tc := range upstreams {
 		t.Run(tc.address, func(t *testing.T) {
+			rslv, err := NewUpstreamResolver(tc.bootstrap, &Options{
+				Timeout: timeout,
+			})
+			require.NoError(t, err)
+
 			u, err := AddressToUpstream(tc.address, &Options{
-				Bootstrap: tc.bootstrap,
+				Bootstrap: rslv,
 				Timeout:   timeout,
 			})
 			require.NoErrorf(t, err, "failed to generate upstream from address %s", tc.address)
@@ -331,8 +354,18 @@ func TestUpstreamsInvalidBootstrap(t *testing.T) {
 
 	for _, tc := range upstreams {
 		t.Run(tc.address, func(t *testing.T) {
+			var rslv ConsequentResolver
+			for _, b := range tc.bootstrap {
+				r, err := NewUpstreamResolver(b, &Options{
+					Timeout: timeout,
+				})
+				require.NoError(t, err)
+
+				rslv = append(rslv, r)
+			}
+
 			u, err := AddressToUpstream(tc.address, &Options{
-				Bootstrap: tc.bootstrap,
+				Bootstrap: rslv,
 				Timeout:   timeout,
 			})
 			require.NoErrorf(t, err, "failed to generate upstream from address %s", tc.address)
@@ -342,15 +375,14 @@ func TestUpstreamsInvalidBootstrap(t *testing.T) {
 		})
 	}
 
-	_, err := AddressToUpstream("tls://example.org", &Options{
-		Bootstrap: []string{"8.8.8.8", "asdfasdf"},
+	t.Run("bad_bootstrap", func(t *testing.T) {
+		_, err := NewUpstreamResolver("asdfasdf", nil)
+		assert.Error(t, err) // bad bootstrap "asdfasdf"
 	})
-	assert.Error(t, err) // bad bootstrap "asdfasdf"
 }
 
 func TestUpstreamsWithServerIP(t *testing.T) {
-	// use invalid bootstrap to make sure it fails if tries to use it
-	invalidBootstrap := []string{"1.2.3.4:55"}
+	// TODO(e.burkov):  !! add resolver listener that panics on requests.
 
 	h := func(w dns.ResponseWriter, m *dns.Msg) {
 		require.NoError(testutil.PanicT{}, w.WriteMsg(respondToTestMessage(m)))
@@ -375,15 +407,15 @@ func TestUpstreamsWithServerIP(t *testing.T) {
 	upstreams := []struct {
 		name      string
 		address   string
-		serverIPs []net.IP
+		serverIPs []netip.Addr
 	}{{
 		name:      "dot",
 		address:   fmt.Sprintf("tls://some.dns.server:%d", dotSrv.port),
-		serverIPs: []net.IP{netutil.IPv4Localhost().AsSlice()},
+		serverIPs: []netip.Addr{netutil.IPv4Localhost()},
 	}, {
 		name:      "doh",
 		address:   fmt.Sprintf("https://some.dns.server:%s/dns-query", dohPort),
-		serverIPs: []net.IP{netutil.IPv4Localhost().AsSlice()},
+		serverIPs: []netip.Addr{netutil.IPv4Localhost()},
 	}, {
 		name:      "dot_stamp",
 		address:   dotStamp,
@@ -397,9 +429,10 @@ func TestUpstreamsWithServerIP(t *testing.T) {
 	for _, tc := range upstreams {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := &Options{
-				Bootstrap:          invalidBootstrap,
+				Bootstrap: ConsequentResolver{
+					StaticResolver(tc.serverIPs),
+				},
 				Timeout:            timeout,
-				ServerIPAddrs:      tc.serverIPs,
 				InsecureSkipVerify: true,
 			}
 			u, uErr := AddressToUpstream(tc.address, opts)

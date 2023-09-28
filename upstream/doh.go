@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"runtime"
 	"sync"
@@ -74,9 +75,6 @@ type dnsOverHTTPS struct {
 	timeout time.Duration
 }
 
-// type check
-var _ Upstream = (*dnsOverHTTPS)(nil)
-
 // newDoH returns the DNS-over-HTTPS Upstream.
 func newDoH(addr *url.URL, opts *Options) (u Upstream, err error) {
 	addPort(addr, defaultPortDoH)
@@ -128,6 +126,9 @@ func newDoH(addr *url.URL, opts *Options) (u Upstream, err error) {
 
 	return ups, nil
 }
+
+// type check
+var _ Upstream = (*dnsOverHTTPS)(nil)
 
 // Address implements the [Upstream] interface for *dnsOverHTTPS.
 func (p *dnsOverHTTPS) Address() string { return p.addr.String() }
@@ -699,4 +700,17 @@ func isHTTP3(client *http.Client) (ok bool) {
 	_, ok = client.Transport.(*http3Transport)
 
 	return ok
+}
+
+// type check
+var _ UpstreamResolver = (*dnsOverHTTPS)(nil)
+
+// AsResolver implements the [isBootstrapper] interface for *plainDNS.
+func (p *dnsOverHTTPS) AsResolver() (r Resolver, err error) {
+	_, err = netip.ParseAddr(p.addr.Hostname())
+	if err != nil {
+		return nil, err
+	}
+
+	return upstreamResolver{Upstream: p}, nil
 }

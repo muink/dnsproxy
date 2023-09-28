@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"runtime"
@@ -47,9 +48,6 @@ type dnsOverTLS struct {
 	conns []net.Conn
 }
 
-// type check
-var _ Upstream = (*dnsOverTLS)(nil)
-
 // newDoT returns the DNS-over-TLS Upstream.
 func newDoT(addr *url.URL, opts *Options) (ups Upstream, err error) {
 	addPort(addr, defaultPortDoT)
@@ -85,6 +83,9 @@ func newDoT(addr *url.URL, opts *Options) (ups Upstream, err error) {
 
 	return tlsUps, nil
 }
+
+// type check
+var _ Upstream = (*dnsOverTLS)(nil)
 
 // Address implements the [Upstream] interface for *dnsOverTLS.
 func (p *dnsOverTLS) Address() string { return p.addr.String() }
@@ -265,4 +266,17 @@ func isCriticalTCP(err error) (ok bool) {
 	default:
 		return true
 	}
+}
+
+// type check
+var _ UpstreamResolver = (*dnsOverTLS)(nil)
+
+// AsResolver implements the [isBootstrapper] interface for *plainDNS.
+func (p *dnsOverTLS) AsResolver() (r Resolver, err error) {
+	_, err = netip.ParseAddr(p.addr.Hostname())
+	if err != nil {
+		return nil, err
+	}
+
+	return upstreamResolver{Upstream: p}, nil
 }

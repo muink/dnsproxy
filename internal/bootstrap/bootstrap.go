@@ -26,7 +26,7 @@ type DialHandler func(ctx context.Context, network, addr string) (conn net.Conn,
 func ResolveDialContext(
 	u *url.URL,
 	timeout time.Duration,
-	resolvers []Resolver,
+	resolver Resolver,
 	preferIPv6 bool,
 ) (h DialHandler, err error) {
 	defer func() { err = errors.Annotate(err, "dialing %q: %w", u.Host) }()
@@ -45,7 +45,7 @@ func ResolveDialContext(
 		defer cancel()
 	}
 
-	ips, err := LookupParallel(ctx, resolvers, host)
+	ips, err := resolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
 		return nil, fmt.Errorf("resolving hostname: %w", err)
 	}

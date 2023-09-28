@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -44,9 +45,6 @@ type plainDNS struct {
 	timeout time.Duration
 }
 
-// type check
-var _ Upstream = &plainDNS{}
-
 // newPlain returns the plain DNS Upstream.  addr.Scheme should be either "udp"
 // or "tcp".
 func newPlain(addr *url.URL, opts *Options) (u *plainDNS, err error) {
@@ -71,6 +69,9 @@ func newPlain(addr *url.URL, opts *Options) (u *plainDNS, err error) {
 		timeout:   opts.Timeout,
 	}, nil
 }
+
+// type check
+var _ Upstream = &plainDNS{}
 
 // Address implements the [Upstream] interface for *plainDNS.
 func (p *plainDNS) Address() string {
@@ -201,4 +202,17 @@ func validatePlainResponse(req, resp *dns.Msg) (err error) {
 	}
 
 	return nil
+}
+
+// type check
+var _ UpstreamResolver = (*plainDNS)(nil)
+
+// AsResolver implements the [isBootstrapper] interface for *plainDNS.
+func (p *plainDNS) AsResolver() (r Resolver, err error) {
+	_, err = netip.ParseAddr(p.addr.Hostname())
+	if err != nil {
+		return nil, err
+	}
+
+	return upstreamResolver{Upstream: p}, nil
 }

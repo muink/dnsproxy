@@ -5,7 +5,6 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/AdguardTeam/dnsproxy/internal/bootstrap"
 	"github.com/AdguardTeam/golibs/errors"
 	"github.com/AdguardTeam/golibs/log"
 	"github.com/miekg/dns"
@@ -169,6 +168,10 @@ func exchangeAndLog(u Upstream, req *dns.Msg) (resp *dns.Msg, err error) {
 
 // LookupParallel tries to lookup for ip of host with all resolvers
 // concurrently.
-func LookupParallel(ctx context.Context, resolvers []Resolver, host string) ([]netip.Addr, error) {
-	return bootstrap.LookupParallel(ctx, resolvers, host)
+func LookupParallel(
+	ctx context.Context,
+	resolvers []Resolver,
+	host string,
+) (addrs []netip.Addr, err error) {
+	return ParallelResolver(resolvers).LookupNetIP(ctx, "ip", host)
 }
