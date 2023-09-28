@@ -77,7 +77,13 @@ type lookupResult struct {
 
 // lookupAsync tries to lookup for ip of host with r and sends the result into
 // resCh.  It's inteneded to be used as a goroutine.
-func lookupAsync(ctx context.Context, r Resolver, network string, host string, resCh chan<- *lookupResult) {
+func lookupAsync(
+	ctx context.Context,
+	r Resolver,
+	network,
+	host string,
+	resCh chan<- *lookupResult,
+) {
 	defer log.OnPanic("parallel lookup")
 
 	addrs, err := lookup(ctx, r, network, host)
@@ -88,7 +94,7 @@ func lookupAsync(ctx context.Context, r Resolver, network string, host string, r
 }
 
 // lookup tries to lookup ip of host with r.
-func lookup(ctx context.Context, r Resolver, network string, host string) (addrs []netip.Addr, err error) {
+func lookup(ctx context.Context, r Resolver, network, host string) (addrs []netip.Addr, err error) {
 	start := time.Now()
 	addrs, err = r.LookupNetIP(ctx, network, host)
 	elapsed := time.Since(start)
