@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -57,14 +56,9 @@ func newPlain(addr *url.URL, opts *Options) (u *plainDNS, err error) {
 
 	addPort(addr, defaultPortPlain)
 
-	getDialer, err := newDialerInitializer(addr, opts)
-	if err != nil {
-		return nil, err
-	}
-
 	return &plainDNS{
 		addr:      addr,
-		getDialer: getDialer,
+		getDialer: newDialerInitializer(addr, opts),
 		net:       addr.Scheme,
 		timeout:   opts.Timeout,
 	}, nil
@@ -202,17 +196,4 @@ func validatePlainResponse(req, resp *dns.Msg) (err error) {
 	}
 
 	return nil
-}
-
-// type check
-var _ UpstreamResolver = (*plainDNS)(nil)
-
-// AsResolver implements the [isBootstrapper] interface for *plainDNS.
-func (p *plainDNS) AsResolver() (r Resolver, err error) {
-	_, err = netip.ParseAddr(p.addr.Hostname())
-	if err != nil {
-		return nil, err
-	}
-
-	return upstreamResolver{Upstream: p}, nil
 }

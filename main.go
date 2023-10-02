@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AdguardTeam/dnsproxy/internal/bootstrap"
+	"github.com/AdguardTeam/dnsproxy/internal/osutil"
 	"github.com/AdguardTeam/dnsproxy/internal/version"
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/dnsproxy/upstream"
@@ -374,13 +376,21 @@ func initUpstreams(config *proxy.Config, options *Options) {
 		}
 	}
 
-	var err error
-
 	timeout := options.Timeout.Duration
+	bootOpts := &upstream.Options{
+		HTTPVersions:       httpVersions,
+		InsecureSkipVerify: options.Insecure,
+		Timeout:            timeout,
+	}
+	boot, err := initBootstrap(options.BootstrapDNS, bootOpts)
+	if err != nil {
+		log.Fatalf("error while initializing bootstrap: %s", err)
+	}
+
 	upsOpts := &upstream.Options{
 		HTTPVersions:       httpVersions,
 		InsecureSkipVerify: options.Insecure,
-		Bootstrap:          options.BootstrapDNS,
+		Bootstrap:          boot,
 		Timeout:            timeout,
 	}
 	upstreams := loadServersList(options.Upstreams)
@@ -392,7 +402,7 @@ func initUpstreams(config *proxy.Config, options *Options) {
 
 	privUpsOpts := &upstream.Options{
 		HTTPVersions: httpVersions,
-		Bootstrap:    options.BootstrapDNS,
+		Bootstrap:    boot,
 		Timeout:      mathutil.Min(defaultLocalTimeout, timeout),
 	}
 	privUpstreams := loadServersList(options.PrivateRDNSUpstreams)
@@ -421,6 +431,39 @@ func initUpstreams(config *proxy.Config, options *Options) {
 		config.UpstreamMode = proxy.UModeFastestAddr
 	} else {
 		config.UpstreamMode = proxy.UModeLoadBalance
+	}
+}
+
+// initBootstrap initializes the [upstream.Resolver] for bootstrapping upstream
+// servers.  It returns the default resolver if no bootstraps were specified.
+// The returned resolver will also use system hosts files first.
+func initBootstrap(bootstraps []string, opts *upstream.Options) (r upstream.Resolver, err error) {
+	var resolvers []upstream.Resolver
+
+	for i, b := range bootstraps {
+		var resolver upstream.Resolver
+		resolver, err = upstream.NewUpstreamResolver(b, opts)
+		if err != nil {
+			return nil, fmt.Errorf("creating bootstrap resolver at index %d: %s", i, err)
+		}
+
+		resolvers = append(resolvers, resolver)
+	}
+
+	switch len(resolvers) {
+	case 0:
+		etcHosts, hostsErr := bootstrap.NewDefaultHostsResolver(osutil.RootDirFS())
+		if hostsErr != nil {
+			log.Error("creating default hosts resolver: %s", hostsErr)
+
+			return net.DefaultResolver, nil
+		}
+
+		return upstream.ConsequentResolver{etcHosts, net.DefaultResolver}, nil
+	case 1:
+		return resolvers[0], nil
+	default:
+		return upstream.ParallelResolver(resolvers), nil
 	}
 }
 

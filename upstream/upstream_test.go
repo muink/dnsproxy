@@ -199,11 +199,11 @@ func TestUpstreams(t *testing.T) {
 
 	for _, test := range upstreams {
 		t.Run(test.address, func(t *testing.T) {
-			u, err := AddressToUpstream(
+			u, upsErr := AddressToUpstream(
 				test.address,
 				&Options{Bootstrap: test.bootstrap, Timeout: timeout},
 			)
-			require.NoErrorf(t, err, "failed to generate upstream from address %s", test.address)
+			require.NoErrorf(t, upsErr, "failed to generate upstream from address %s", test.address)
 			testutil.CleanupAndRequireSuccess(t, u.Close)
 
 			checkUpstream(t, u, test.address)
@@ -253,8 +253,8 @@ func TestAddressToUpstream(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.addr, func(t *testing.T) {
-			u, err := AddressToUpstream(tc.addr, tc.opt)
-			require.NoError(t, err)
+			u, upsErr := AddressToUpstream(tc.addr, tc.opt)
+			require.NoError(t, upsErr)
 			testutil.CleanupAndRequireSuccess(t, u.Close)
 
 			assert.Equal(t, tc.want, u.Address())

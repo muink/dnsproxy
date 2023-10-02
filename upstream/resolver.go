@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"net/url"
 
 	"github.com/AdguardTeam/dnsproxy/internal/bootstrap"
 	proxynetutil "github.com/AdguardTeam/dnsproxy/internal/netutil"
@@ -16,14 +17,6 @@ import (
 
 // Resolver is an alias for [bootstrap.Resolver] to avoid the import cycle.
 type Resolver = bootstrap.Resolver
-
-// UpstreamResolver is an interface extension for [Upstream] that may appear
-// usable as [Resolver] without bootstrap.
-type UpstreamResolver interface {
-	// AsResolver returns a [Resolver] made of upstream, but only in case the
-	// latter doesn't need bootstrap.
-	AsResolver() (r Resolver, err error)
-}
 
 // NewUpstreamResolver creates an upstream that can be used as [Resolver].
 // resolverAddress format is the same as in the [AddressToUpstream], except that
@@ -45,46 +38,74 @@ func NewUpstreamResolver(resolverAddress string, opts *Options) (r Resolver, err
 		err = fmt.Errorf("creating upstream: %w", err)
 		log.Error("upstream bootstrap: %s", err)
 
-		return r, err
+		return StaticResolver{}, err
 	}
 
-	if b, ok := ups.(UpstreamResolver); !ok {
-		err = fmt.Errorf("unknown upstream type: %T", ups)
-	} else if r, err = b.AsResolver(); err != nil {
-		err = fmt.Errorf("bootstrap %s: %w", ups.Address(), err)
-	}
-
-	return r, err
+	return asBootstrap(ups, upsOpts.PreferIPv6)
 }
 
-// upstreamResolver is a wrapper around Upstream that implements the
-// [bootstrap.Resolver] interface.  It sorts the resolved addresses preferring
-// IPv4.
-type upstreamResolver struct {
-	// Upstream is embedded here to avoid implementing another Upstream's
-	// methods.
-	Upstream
+// asBootstrap converts an Upstream to a bootstrap Resolver if it's possible.
+// It returns an error otherwise, which explains why the conversion failed.
+func asBootstrap(u Upstream, preferIPv6 bool) (r Resolver, err error) {
+	var upsURL *url.URL
+	switch u := u.(type) {
+	case *dnsCrypt:
+		return UpstreamResolver{
+			Upstream:   u,
+			PreferIPv6: preferIPv6,
+		}, nil
+	case *plainDNS:
+		upsURL = u.addr
+	case *dnsOverTLS:
+		upsURL = u.addr
+	case *dnsOverHTTPS:
+		upsURL = u.addr
+	case *dnsOverQUIC:
+		upsURL = u.addr
+	default:
+		return StaticResolver{}, fmt.Errorf("unknown upstream type: %T", u)
+	}
+
+	// Make sure the upstream doesn't need a bootstrap.
+	_, err = netip.ParseAddr(upsURL.Hostname())
+	if err != nil {
+		return StaticResolver{}, fmt.Errorf("bootstrap %s: %w", u.Address(), err)
+	}
+
+	return UpstreamResolver{
+		Upstream:   u,
+		PreferIPv6: preferIPv6,
+	}, nil
+}
+
+// UpstreamResolver is a wrapper around Upstream that implements the
+// [bootstrap.Resolver] interface.
+type UpstreamResolver struct {
+	// Upstream is used for lookups.  It must not be nil.
+	Upstream Upstream
+
+	// PreferIPv6 is true if IPv6 addresses should be preferred over IPv4 ones.
+	PreferIPv6 bool
 }
 
 // type check
-var _ Resolver = upstreamResolver{}
+var _ Resolver = UpstreamResolver{}
 
 // LookupNetIP implements the [Resolver] interface for upstreamResolver.
 //
 // TODO(e.burkov):  Use context.
-func (r upstreamResolver) LookupNetIP(
+func (r UpstreamResolver) LookupNetIP(
 	_ context.Context,
 	network string,
 	host string,
 ) (ipAddrs []netip.Addr, err error) {
-	// TODO(e.burkov):  Investigate when [r.Upstream] is nil and why.
-	if r.Upstream == nil || host == "" {
+	if host == "" {
 		return []netip.Addr{}, nil
 	}
 
 	host = dns.Fqdn(host)
 
-	answers := make([][]dns.RR, 1, 2)
+	var answers []dns.RR
 	var errs []error
 	switch network {
 	case "ip4", "ip6":
@@ -99,52 +120,47 @@ func (r upstreamResolver) LookupNetIP(
 			return []netip.Addr{}, err
 		}
 
-		answers[0] = resp.Answer
+		answers = resp.Answer
 	case "ip":
-		resCh := make(chan *resolveResult, 2)
+		resCh := make(chan any, 2)
 
 		go r.resolveAsync(resCh, host, dns.TypeA)
 		go r.resolveAsync(resCh, host, dns.TypeAAAA)
 
-		answers = answers[:0:cap(answers)]
 		for i := 0; i < 2; i++ {
-			res := <-resCh
-			if res.err != nil {
-				errs = append(errs, res.err)
-
-				continue
+			switch res := <-resCh; res := res.(type) {
+			case error:
+				errs = append(errs, res)
+			case *dns.Msg:
+				answers = append(answers, res.Answer...)
 			}
-
-			answers = append(answers, res.resp.Answer)
 		}
+
+		// Use the previous dnsproxy behavior: prefer IPv4 by default.
+		//
+		// TODO(a.garipov): Consider unexporting this entire method or
+		// documenting that the order of addrs is undefined.
+		proxynetutil.SortNetIPAddrs(ipAddrs, r.PreferIPv6)
 	default:
 		return []netip.Addr{}, fmt.Errorf("unsupported network %s", network)
 	}
 
-	for _, ans := range answers {
-		for _, rr := range ans {
-			if addr, ok := netip.AddrFromSlice(proxyutil.IPFromRR(rr)); ok {
-				ipAddrs = append(ipAddrs, addr)
-			}
+	for _, rr := range answers {
+		if addr, ok := netip.AddrFromSlice(proxyutil.IPFromRR(rr)); ok {
+			ipAddrs = append(ipAddrs, addr)
 		}
 	}
 
 	// TODO(e.burkov):  Use [errors.Join] in Go 1.20.
 	if len(ipAddrs) == 0 && len(errs) > 0 {
-		return []netip.Addr{}, errs[0]
+		return []netip.Addr{}, errors.List("resolving", errs...)
 	}
-
-	// Use the previous dnsproxy behavior: prefer IPv4 by default.
-	//
-	// TODO(a.garipov): Consider unexporting this entire method or
-	// documenting that the order of addrs is undefined.
-	proxynetutil.SortNetIPAddrs(ipAddrs, false)
 
 	return ipAddrs, nil
 }
 
 // resolve performs a single DNS lookup of host.
-func (r upstreamResolver) resolve(host string, qtype uint16) (resp *dns.Msg, err error) {
+func (r UpstreamResolver) resolve(host string, qtype uint16) (resp *dns.Msg, err error) {
 	req := &dns.Msg{
 		MsgHdr: dns.MsgHdr{
 			Id:               dns.Id(),
@@ -157,24 +173,18 @@ func (r upstreamResolver) resolve(host string, qtype uint16) (resp *dns.Msg, err
 		}},
 	}
 
-	return r.Exchange(req)
-}
-
-// resolveResult is the result of a single concurrent lookup.
-type resolveResult = struct {
-	resp *dns.Msg
-	err  error
+	return r.Upstream.Exchange(req)
 }
 
 // resolveAsync performs a single DNS lookup and sends the result to ch.  It's
 // intended to be used as a goroutine.
-func (r upstreamResolver) resolveAsync(
-	resCh chan<- *resolveResult,
-	host string,
-	qtype uint16,
-) {
+func (r UpstreamResolver) resolveAsync(resCh chan<- any, host string, qtype uint16) {
 	resp, err := r.resolve(host, qtype)
-	resCh <- &resolveResult{resp: resp, err: err}
+	if err != nil {
+		resCh <- err
+	} else {
+		resCh <- resp
+	}
 }
 
 // StaticResolver is a resolver which always responds with an underlying slice
@@ -206,6 +216,10 @@ func (r ConsequentResolver) LookupNetIP(
 	network,
 	host string,
 ) (addrs []netip.Addr, err error) {
+	if len(r) == 0 {
+		return nil, bootstrap.ErrNoResolvers
+	}
+
 	var errs []error
 	for _, res := range r {
 		addrs, err = res.LookupNetIP(ctx, network, host)

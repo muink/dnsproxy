@@ -21,8 +21,8 @@ import (
 // specified at initialization and ignores the addr.
 type DialHandler func(ctx context.Context, network, addr string) (conn net.Conn, err error)
 
-// ResolveDialContext returns a DialHandler that uses addresses resolved from
-// u using resolvers.  u must not be nil.
+// ResolveDialContext returns a DialHandler that uses addresses resolved from u
+// using resolver.  u and resolver must not be nil.
 func ResolveDialContext(
 	u *url.URL,
 	timeout time.Duration,
@@ -36,6 +36,10 @@ func ResolveDialContext(
 		// Don't wrap the error since it's informative enough as is and there is
 		// already deferred annotation here.
 		return nil, err
+	}
+
+	if resolver == nil {
+		return nil, fmt.Errorf("resolver is nil: %w", ErrNoResolvers)
 	}
 
 	ctx := context.Background()

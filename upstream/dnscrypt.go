@@ -149,11 +149,3 @@ func (p *dnsCrypt) resetClient() (client *dnscrypt.Client, ri *dnscrypt.Resolver
 
 	return client, ri, err
 }
-
-// type check
-var _ UpstreamResolver = (*dnsCrypt)(nil)
-
-// AsResolver implements the [isBootstrapper] interface for *plainDNS.
-func (p *dnsCrypt) AsResolver() (r Resolver, err error) {
-	return upstreamResolver{Upstream: p}, nil
-}

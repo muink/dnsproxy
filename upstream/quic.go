@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
-	"net/netip"
 	"net/url"
 	"runtime"
 	"sync"
@@ -95,13 +94,8 @@ type dnsOverQUIC struct {
 func newDoQ(addr *url.URL, opts *Options) (u Upstream, err error) {
 	addPort(addr, defaultPortDoQ)
 
-	getDialer, err := newDialerInitializer(addr, opts)
-	if err != nil {
-		return nil, err
-	}
-
 	u = &dnsOverQUIC{
-		getDialer: getDialer,
+		getDialer: newDialerInitializer(addr, opts),
 		addr:      addr,
 		quicConfig: &quic.Config{
 			KeepAlivePeriod: QUICKeepAlivePeriod,
@@ -503,17 +497,4 @@ func (p *dnsOverQUIC) withDeadline(
 	}
 
 	return ctx, cancel
-}
-
-// type check
-var _ UpstreamResolver = (*dnsOverQUIC)(nil)
-
-// AsResolver implements the [isBootstrapper] interface for *plainDNS.
-func (p *dnsOverQUIC) AsResolver() (r Resolver, err error) {
-	_, err = netip.ParseAddr(p.addr.Hostname())
-	if err != nil {
-		return nil, err
-	}
-
-	return upstreamResolver{Upstream: p}, nil
 }

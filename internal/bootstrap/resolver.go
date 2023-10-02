@@ -48,31 +48,23 @@ func (r ParallelResolver) LookupNetIP(
 
 	// Size of channel must accommodate results of lookups from all resolvers,
 	// sending into channel will be block otherwise.
-	ch := make(chan *lookupResult, resolversNum)
+	ch := make(chan any, resolversNum)
 	for _, rslv := range r {
-		go lookupAsync(ctx, rslv, host, network, ch)
+		go lookupAsync(ctx, rslv, network, host, ch)
 	}
 
 	var errs []error
 	for range r {
-		result := <-ch
-		if result.err != nil {
-			errs = append(errs, result.err)
-
-			continue
+		switch result := <-ch; result := result.(type) {
+		case error:
+			errs = append(errs, result)
+		case []netip.Addr:
+			return result, nil
 		}
-
-		return result.addrs, nil
 	}
 
 	// TODO(e.burkov):  Use [errors.Join] in Go 1.20.
 	return nil, errors.List("all resolvers failed", errs...)
-}
-
-// lookupResult is a structure that represents the result of a lookup.
-type lookupResult struct {
-	err   error
-	addrs []netip.Addr
 }
 
 // lookupAsync tries to lookup for ip of host with r and sends the result into
@@ -82,14 +74,15 @@ func lookupAsync(
 	r Resolver,
 	network,
 	host string,
-	resCh chan<- *lookupResult,
+	resCh chan<- any,
 ) {
 	defer log.OnPanic("parallel lookup")
 
 	addrs, err := lookup(ctx, r, network, host)
-	resCh <- &lookupResult{
-		err:   err,
-		addrs: addrs,
+	if err != nil {
+		resCh <- err
+	} else {
+		resCh <- addrs
 	}
 }
 

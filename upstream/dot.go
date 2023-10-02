@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/netip"
 	"net/url"
 	"os"
 	"runtime"
@@ -52,15 +51,9 @@ type dnsOverTLS struct {
 func newDoT(addr *url.URL, opts *Options) (ups Upstream, err error) {
 	addPort(addr, defaultPortDoT)
 
-	getDialer, err := newDialerInitializer(addr, opts)
-	if err != nil {
-		// Don't wrap the error since it's informative enough as is.
-		return nil, err
-	}
-
 	tlsUps := &dnsOverTLS{
 		addr:      addr,
-		getDialer: getDialer,
+		getDialer: newDialerInitializer(addr, opts),
 		// #nosec G402 -- TLS certificate verification could be disabled by
 		// configuration.
 		tlsConf: &tls.Config{
@@ -266,17 +259,4 @@ func isCriticalTCP(err error) (ok bool) {
 	default:
 		return true
 	}
-}
-
-// type check
-var _ UpstreamResolver = (*dnsOverTLS)(nil)
-
-// AsResolver implements the [isBootstrapper] interface for *plainDNS.
-func (p *dnsOverTLS) AsResolver() (r Resolver, err error) {
-	_, err = netip.ParseAddr(p.addr.Hostname())
-	if err != nil {
-		return nil, err
-	}
-
-	return upstreamResolver{Upstream: p}, nil
 }

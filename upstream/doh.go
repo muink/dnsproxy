@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"runtime"
 	"sync"
@@ -87,14 +86,8 @@ func newDoH(addr *url.URL, opts *Options) (u Upstream, err error) {
 		httpVersions = DefaultHTTPVersions
 	}
 
-	getDialer, err := newDialerInitializer(addr, opts)
-	if err != nil {
-		// Don't wrap the error since it's informative enough as is.
-		return nil, err
-	}
-
 	ups := &dnsOverHTTPS{
-		getDialer: getDialer,
+		getDialer: newDialerInitializer(addr, opts),
 		addr:      addr,
 		quicConfig: &quic.Config{
 			KeepAlivePeriod: QUICKeepAlivePeriod,
@@ -700,17 +693,4 @@ func isHTTP3(client *http.Client) (ok bool) {
 	_, ok = client.Transport.(*http3Transport)
 
 	return ok
-}
-
-// type check
-var _ UpstreamResolver = (*dnsOverHTTPS)(nil)
-
-// AsResolver implements the [isBootstrapper] interface for *plainDNS.
-func (p *dnsOverHTTPS) AsResolver() (r Resolver, err error) {
-	_, err = netip.ParseAddr(p.addr.Hostname())
-	if err != nil {
-		return nil, err
-	}
-
-	return upstreamResolver{Upstream: p}, nil
 }

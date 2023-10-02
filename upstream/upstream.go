@@ -77,7 +77,7 @@ type Options struct {
 	CipherSuites []uint16
 
 	// Bootstrap is used to resolve upstreams' hostnames.  Any DNSCrypt upstream
-	// as well as any upstreav defined by plain IP address could be used.
+	// as well as any upstream having a plain IP address hostname could be used.
 	Bootstrap Resolver
 
 	// HTTPVersions is a list of HTTP versions that should be supported by the
@@ -300,17 +300,12 @@ type DialerInitializer func() (handler bootstrap.DialHandler, err error)
 
 // newDialerInitializer creates an initializer of the dialer that will dial the
 // addresses resolved from u using opts.
-func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer, err error) {
-	host, _, err := netutil.SplitHostPort(u.Host)
-	if err != nil {
-		return nil, fmt.Errorf("invalid address: %s: %w", u.Host, err)
-	}
-
-	if _, err = netip.ParseAddr(host); err == nil {
+func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer) {
+	if _, err := netip.ParseAddrPort(u.Host); err == nil {
 		// Don't resolve the address of the server since it's already an IP.
 		handler := bootstrap.NewDialContext(opts.Timeout, u.Host)
 
-		return func() (bootstrap.DialHandler, error) { return handler, nil }, nil
+		return func() (bootstrap.DialHandler, error) { return handler, nil }
 	}
 
 	boot := opts.Bootstrap
@@ -341,5 +336,5 @@ func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer, err 
 		}
 
 		return h, nil
-	}, nil
+	}
 }
