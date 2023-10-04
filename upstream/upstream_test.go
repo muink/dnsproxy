@@ -381,9 +381,7 @@ func TestUpstreamsInvalidBootstrap(t *testing.T) {
 	})
 }
 
-func TestUpstreamsWithServerIP(t *testing.T) {
-	// TODO(e.burkov):  !! add resolver listener that panics on requests.
-
+func TestAddressToUpstream_StaticResolver(t *testing.T) {
 	h := func(w dns.ResponseWriter, m *dns.Msg) {
 		require.NoError(testutil.PanicT{}, w.WriteMsg(respondToTestMessage(m)))
 	}
@@ -391,6 +389,8 @@ func TestUpstreamsWithServerIP(t *testing.T) {
 	dohSrv := startDoHServer(t, testDoHServerOptions{})
 	_, dohPort, err := net.SplitHostPort(dohSrv.addr)
 	require.NoError(t, err)
+
+	badResolver := UpstreamResolver{Upstream: nil}
 
 	dotStamp := (&dnsstamps.ServerStamp{
 		ServerAddrStr: netip.AddrPortFrom(netutil.IPv4Localhost(), uint16(dotSrv.port)).String(),
@@ -405,33 +405,31 @@ func TestUpstreamsWithServerIP(t *testing.T) {
 	}).String()
 
 	upstreams := []struct {
-		name      string
-		address   string
-		serverIPs []netip.Addr
+		rslv    Resolver
+		name    string
+		address string
 	}{{
-		name:      "dot",
-		address:   fmt.Sprintf("tls://some.dns.server:%d", dotSrv.port),
-		serverIPs: []netip.Addr{netutil.IPv4Localhost()},
+		rslv:    StaticResolver{netutil.IPv4Localhost()},
+		name:    "dot",
+		address: fmt.Sprintf("tls://some.dns.server:%d", dotSrv.port),
 	}, {
-		name:      "doh",
-		address:   fmt.Sprintf("https://some.dns.server:%s/dns-query", dohPort),
-		serverIPs: []netip.Addr{netutil.IPv4Localhost()},
+		rslv:    StaticResolver{netutil.IPv4Localhost()},
+		name:    "doh",
+		address: fmt.Sprintf("https://some.dns.server:%s/dns-query", dohPort),
 	}, {
-		name:      "dot_stamp",
-		address:   dotStamp,
-		serverIPs: nil,
+		rslv:    badResolver,
+		name:    "dot_stamp",
+		address: dotStamp,
 	}, {
-		name:      "doh_stamp",
-		address:   dohStamp,
-		serverIPs: nil,
+		rslv:    badResolver,
+		name:    "doh_stamp",
+		address: dohStamp,
 	}}
 
 	for _, tc := range upstreams {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := &Options{
-				Bootstrap: ConsequentResolver{
-					StaticResolver(tc.serverIPs),
-				},
+				Bootstrap:          tc.rslv,
 				Timeout:            timeout,
 				InsecureSkipVerify: true,
 			}
@@ -439,7 +437,9 @@ func TestUpstreamsWithServerIP(t *testing.T) {
 			require.NoError(t, uErr)
 			testutil.CleanupAndRequireSuccess(t, u.Close)
 
-			checkUpstream(t, u, tc.address)
+			assert.NotPanics(t, func() {
+				checkUpstream(t, u, tc.address)
+			})
 		})
 	}
 }

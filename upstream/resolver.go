@@ -118,62 +118,25 @@ func (r UpstreamResolver) LookupNetIP(
 	_ context.Context,
 	network string,
 	host string,
-) (ipAddrs []netip.Addr, err error) {
+) (ips []netip.Addr, err error) {
 	if host == "" {
-		return []netip.Addr{}, nil
+		return nil, nil
 	}
 
-	host = dns.Fqdn(host)
-
-	var errs []error
-	switch network {
-	case "ip4", "ip6":
-		var answers []dns.RR
-		answers, err = r.resolve(host, network)
-		if err != nil {
-			errs = append(errs, err)
-		} else {
-			ipAddrs = appendRRs(ipAddrs, answers)
-		}
-	case "ip":
-		resCh := make(chan any, 2)
-		go r.resolveAsync(resCh, host, "ip4")
-		go r.resolveAsync(resCh, host, "ip6")
-
-		for i := 0; i < 2; i++ {
-			switch res := <-resCh; res := res.(type) {
-			case error:
-				errs = append(errs, res)
-			case []dns.RR:
-				ipAddrs = appendRRs(ipAddrs, res)
-			}
-		}
-
-		proxynetutil.SortNetIPAddrs(ipAddrs, r.PreferIPv6)
-	default:
-		return []netip.Addr{}, fmt.Errorf("unsupported network %s", network)
+	ips, err = r.lookup(dns.Fqdn(host), network)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(ipAddrs) == 0 && len(errs) > 0 {
-		return []netip.Addr{}, errors.Join(errs...)
-	}
+	proxynetutil.SortNetIPAddrs(ips, r.PreferIPv6)
 
-	return ipAddrs, nil
+	return ips, nil
 }
 
-// appendRRs appends valid addresses from rrs to addrs.
-func appendRRs(addrs []netip.Addr, rrs []dns.RR) (res []netip.Addr) {
-	for _, rr := range rrs {
-		if addr := proxyutil.IPFromRR(rr); addr.IsValid() {
-			addrs = append(addrs, addr)
-		}
-	}
-
-	return addrs
-}
-
-// resolve performs a single DNS lookup of host and returns the answer section.
-func (r UpstreamResolver) resolve(host, network string) (ans []dns.RR, err error) {
+// resolve performs a single DNS lookup of host and returns all the valid
+// addresses from the answer section of the response.  network must be either
+// "ip4" or "ip6".
+func (r UpstreamResolver) resolve(host, network string) (addrs []netip.Addr, err error) {
 	qtype := dns.TypeA
 	if network == "ip6" {
 		qtype = dns.TypeAAAA
@@ -192,11 +155,17 @@ func (r UpstreamResolver) resolve(host, network string) (ans []dns.RR, err error
 	}
 
 	resp, err := r.Upstream.Exchange(req)
-	if err != nil {
+	if err != nil || resp == nil {
 		return nil, err
 	}
 
-	return resp.Answer, nil
+	for _, rr := range resp.Answer {
+		if addr := proxyutil.IPFromRR(rr); addr.IsValid() {
+			addrs = append(addrs, addr)
+		}
+	}
+
+	return addrs, nil
 }
 
 // resolveAsync performs a single DNS lookup and sends the result to ch.  It's
@@ -208,6 +177,42 @@ func (r UpstreamResolver) resolveAsync(resCh chan<- any, host, network string) {
 	} else {
 		resCh <- resp
 	}
+}
+
+// lookup performs necessary DNS lookups of host and returns all the valid
+// addresses from the answer section of the responses.
+func (r UpstreamResolver) lookup(host, network string) (ips []netip.Addr, err error) {
+	switch network {
+	case "ip4", "ip6":
+		ips, err = r.resolve(host, network)
+		if err != nil {
+			return []netip.Addr{}, err
+		}
+	case "ip":
+		resCh := make(chan any, 2)
+		go r.resolveAsync(resCh, host, "ip4")
+		go r.resolveAsync(resCh, host, "ip6")
+
+		var errs []error
+		for i := 0; i < 2; i++ {
+			switch res := <-resCh; res := res.(type) {
+			case error:
+				errs = append(errs, res)
+			case []netip.Addr:
+				ips = append(ips, res...)
+			}
+		}
+
+		err = errors.Join(errs...)
+	default:
+		return []netip.Addr{}, fmt.Errorf("unsupported network %s", network)
+	}
+
+	if len(ips) == 0 && err != nil {
+		return []netip.Addr{}, err
+	}
+
+	return ips, nil
 }
 
 // StaticResolver is a resolver which always responds with an underlying slice
