@@ -168,6 +168,8 @@ func exchangeAndLog(u Upstream, req *dns.Msg) (resp *dns.Msg, err error) {
 
 // LookupParallel tries to lookup for ip of host with all resolvers
 // concurrently.
+//
+// Deprecated:  Use [ParallelResolver] instead.
 func LookupParallel(
 	ctx context.Context,
 	resolvers []Resolver,

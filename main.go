@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/AdguardTeam/dnsproxy/internal/bootstrap"
+	"github.com/AdguardTeam/dnsproxy/internal/netutil"
 	"github.com/AdguardTeam/dnsproxy/internal/osutil"
 	"github.com/AdguardTeam/dnsproxy/internal/version"
 	"github.com/AdguardTeam/dnsproxy/proxy"
 	"github.com/AdguardTeam/dnsproxy/upstream"
 	"github.com/AdguardTeam/golibs/log"
 	"github.com/AdguardTeam/golibs/mathutil"
-	"github.com/AdguardTeam/golibs/netutil"
 	"github.com/AdguardTeam/golibs/timeutil"
 	"github.com/ameshkov/dnscrypt/v2"
 	goFlags "github.com/jessevdk/go-flags"
@@ -444,7 +444,7 @@ func initBootstrap(bootstraps []string, opts *upstream.Options) (r upstream.Reso
 		var resolver upstream.Resolver
 		resolver, err = upstream.NewUpstreamResolver(b, opts)
 		if err != nil {
-			return nil, fmt.Errorf("creating bootstrap resolver at index %d: %s", i, err)
+			return nil, fmt.Errorf("creating bootstrap resolver at index %d: %w", i, err)
 		}
 
 		resolvers = append(resolvers, resolver)
@@ -488,15 +488,13 @@ func initBogusNXDomain(config *proxy.Config, options *Options) {
 		return
 	}
 
-	for _, s := range options.BogusNXDomain {
-		subnet, err := netutil.ParseSubnet(s)
+	for i, s := range options.BogusNXDomain {
+		p, err := netutil.ParseSubnet(s)
 		if err != nil {
-			log.Error("%s", err)
-
-			continue
+			log.Error("parsing bogus nxdomain subnet at index %d: %s", i, err)
+		} else {
+			config.BogusNXDomain = append(config.BogusNXDomain, p)
 		}
-
-		config.BogusNXDomain = append(config.BogusNXDomain, subnet)
 	}
 }
 

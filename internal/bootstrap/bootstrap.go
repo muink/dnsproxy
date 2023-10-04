@@ -22,7 +22,7 @@ import (
 type DialHandler func(ctx context.Context, network, addr string) (conn net.Conn, err error)
 
 // ResolveDialContext returns a DialHandler that uses addresses resolved from u
-// using resolver.  u and resolver must not be nil.
+// using resolver.  u must not be nil.
 func ResolveDialContext(
 	u *url.URL,
 	timeout time.Duration,

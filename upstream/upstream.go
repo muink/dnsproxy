@@ -76,8 +76,8 @@ type Options struct {
 	// CipherSuites is a custom list of TLSv1.2 ciphers.
 	CipherSuites []uint16
 
-	// Bootstrap is used to resolve upstreams' hostnames.  Any DNSCrypt upstream
-	// as well as any upstream having a plain IP address hostname could be used.
+	// Bootstrap is used to resolve upstreams' hostnames.  If nil, the
+	// [net.DefaultResolver] will be used.
 	Bootstrap Resolver
 
 	// HTTPVersions is a list of HTTP versions that should be supported by the
@@ -234,13 +234,13 @@ func parseStamp(upsURL *url.URL, opts *Options) (u Upstream, err error) {
 			host = stamp.ServerAddrStr
 		}
 
-		var ips [1]netip.Addr
-		ips[0], err = netip.ParseAddr(host)
+		var ip netip.Addr
+		ip, err = netip.ParseAddr(host)
 		if err != nil {
 			return nil, fmt.Errorf("invalid server stamp address %s", stamp.ServerAddrStr)
 		}
 
-		opts.Bootstrap = StaticResolver(ips[:])
+		opts.Bootstrap = StaticResolver{ip}
 	}
 
 	switch stamp.Proto {
@@ -315,7 +315,8 @@ func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer) {
 	}
 
 	var dialHandler atomic.Value
-	return func() (h bootstrap.DialHandler, resErr error) {
+
+	return func() (h bootstrap.DialHandler, err error) {
 		// Check if the dial handler has already been created.
 		h, ok := dialHandler.Load().(bootstrap.DialHandler)
 		if ok {
@@ -326,9 +327,9 @@ func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer) {
 		// resolve the upstream hostname at the same time.  Currently, the last
 		// successful value will be stored in dialHandler, but ideally we should
 		// resolve only once.
-		h, resolveErr := bootstrap.ResolveDialContext(u, opts.Timeout, boot, opts.PreferIPv6)
-		if resolveErr != nil {
-			return nil, fmt.Errorf("creating dial handler: %w", resolveErr)
+		h, err = bootstrap.ResolveDialContext(u, opts.Timeout, boot, opts.PreferIPv6)
+		if err != nil {
+			return nil, fmt.Errorf("creating dial handler: %w", err)
 		}
 
 		if !dialHandler.CompareAndSwap(nil, h) {
