@@ -62,7 +62,8 @@ func NewUpstreamResolver(resolverAddress string, opts *Options) (r Resolver, err
 // NotBootstrapError is returned by [AddressToUpstream] when the parsed upstream
 // can't be used as a bootstrap and wraps the actual reason.
 type NotBootstrapError struct {
-	why error
+	// err is the actual reason why the upstream can't be used as a bootstrap.
+	err error
 }
 
 // type check
@@ -70,7 +71,7 @@ var _ error = NotBootstrapError{}
 
 // Error implements the [error] interface for NotBootstrapError.
 func (e NotBootstrapError) Error() (msg string) {
-	return fmt.Sprintf("not a bootstrap: %s", e.why)
+	return fmt.Sprintf("not a bootstrap: %s", e.err)
 }
 
 // type check
@@ -78,7 +79,7 @@ var _ errors.Wrapper = NotBootstrapError{}
 
 // Unwrap implements the [errors.Wrapper] interface.
 func (e NotBootstrapError) Unwrap() (reason error) {
-	return e.why
+	return e.err
 }
 
 // validateBootstrap returns an error if u can't be used as a bootstrap.
@@ -102,7 +103,7 @@ func validateBootstrap(u Upstream) (err error) {
 	// Make sure the upstream doesn't need a bootstrap.
 	_, err = netip.ParseAddr(upsURL.Hostname())
 	if err != nil {
-		return NotBootstrapError{why: err}
+		return NotBootstrapError{err: err}
 	}
 
 	return nil

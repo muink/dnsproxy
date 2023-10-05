@@ -97,6 +97,8 @@ func SortNetIPAddrs(addrs []netip.Addr, preferIPv6 bool) {
 
 // ParseSubnet parses s either as a CIDR prefix itself, or as an IP address,
 // returning the corresponding single-IP CIDR prefix.
+//
+// TODO(e.burkov):  Move to golibs.
 func ParseSubnet(s string) (p netip.Prefix, err error) {
 	if strings.Contains(s, "/") {
 		p, err = netip.ParsePrefix(s)
