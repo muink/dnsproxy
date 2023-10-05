@@ -79,7 +79,6 @@ func TestUpstreamConfig_GetUpstreamsForDS(t *testing.T) {
 		upstreams,
 		&upstream.Options{
 			InsecureSkipVerify: false,
-			Bootstrap:          []string{},
 			Timeout:            1 * time.Second,
 		},
 	)
