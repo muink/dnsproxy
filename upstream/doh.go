@@ -185,11 +185,11 @@ func (p *dnsOverHTTPS) Close() (err error) {
 
 	runtime.SetFinalizer(p, nil)
 
-	if p.client == nil {
-		return nil
+	if p.client != nil {
+		err = p.closeClient(p.client)
 	}
 
-	return p.closeClient(p.client)
+	return err
 }
 
 // closeClient cleans up resources used by client if necessary.  Note, that at

@@ -141,11 +141,7 @@ func (p *dnsOverTLS) Close() (err error) {
 		}
 	}
 
-	if len(closeErrs) > 0 {
-		return errors.List("closing tls conns", closeErrs...)
-	}
-
-	return nil
+	return errors.Join(closeErrs...)
 }
 
 // conn returns the first available connection from the pool if there is any, or
