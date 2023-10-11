@@ -314,12 +314,11 @@ func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer) {
 		boot = net.DefaultResolver
 	}
 
-	var dialHandler atomic.Value
+	var dialHandler atomic.Pointer[bootstrap.DialHandler]
 
 	return func() (h bootstrap.DialHandler, err error) {
 		// Check if the dial handler has already been created.
-		h, ok := dialHandler.Load().(bootstrap.DialHandler)
-		if ok {
+		if hPtr := dialHandler.Load(); hPtr != nil {
 			return h, nil
 		}
 
@@ -332,8 +331,8 @@ func newDialerInitializer(u *url.URL, opts *Options) (di DialerInitializer) {
 			return nil, fmt.Errorf("creating dial handler: %w", err)
 		}
 
-		if !dialHandler.CompareAndSwap(nil, h) {
-			return dialHandler.Load().(bootstrap.DialHandler), nil
+		if !dialHandler.CompareAndSwap(nil, &h) {
+			return *dialHandler.Load(), nil
 		}
 
 		return h, nil

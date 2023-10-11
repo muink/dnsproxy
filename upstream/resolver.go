@@ -34,8 +34,8 @@ type UpstreamResolver struct {
 // [Resolver].  resolverAddress format is the same as in the
 // [AddressToUpstream].  If the upstream can't be used as a bootstrap, the
 // returned error will have the underlying type of [NotBootstrapError], and r
-// itself will be fully usable.
-func NewUpstreamResolver(resolverAddress string, opts *Options) (r Resolver, err error) {
+// itself will be fully usable.  Closing r.Upstream is caller's responsibility.
+func NewUpstreamResolver(resolverAddress string, opts *Options) (r *UpstreamResolver, err error) {
 	upsOpts := &Options{}
 
 	// TODO(ameshkov):  Aren't other options needed here?
@@ -53,7 +53,7 @@ func NewUpstreamResolver(resolverAddress string, opts *Options) (r Resolver, err
 		return nil, err
 	}
 
-	return UpstreamResolver{
+	return &UpstreamResolver{
 		Upstream:   ups,
 		PreferIPv6: upsOpts.PreferIPv6,
 	}, validateBootstrap(ups)
@@ -110,12 +110,12 @@ func validateBootstrap(u Upstream) (err error) {
 }
 
 // type check
-var _ Resolver = UpstreamResolver{}
+var _ Resolver = &UpstreamResolver{}
 
 // LookupNetIP implements the [Resolver] interface for upstreamResolver.
 //
 // TODO(e.burkov):  Use context.
-func (r UpstreamResolver) LookupNetIP(
+func (r *UpstreamResolver) LookupNetIP(
 	_ context.Context,
 	network string,
 	host string,
@@ -137,7 +137,7 @@ func (r UpstreamResolver) LookupNetIP(
 // resolve performs a single DNS lookup of host and returns all the valid
 // addresses from the answer section of the response.  network must be either
 // "ip4" or "ip6".
-func (r UpstreamResolver) resolve(host, network string) (addrs []netip.Addr, err error) {
+func (r *UpstreamResolver) resolve(host, network string) (addrs []netip.Addr, err error) {
 	qtype := dns.TypeA
 	if network == "ip6" {
 		qtype = dns.TypeAAAA
@@ -171,7 +171,7 @@ func (r UpstreamResolver) resolve(host, network string) (addrs []netip.Addr, err
 
 // resolveAsync performs a single DNS lookup and sends the result to ch.  It's
 // intended to be used as a goroutine.
-func (r UpstreamResolver) resolveAsync(resCh chan<- any, host, network string) {
+func (r *UpstreamResolver) resolveAsync(resCh chan<- any, host, network string) {
 	resp, err := r.resolve(host, network)
 	if err != nil {
 		resCh <- err
@@ -182,7 +182,7 @@ func (r UpstreamResolver) resolveAsync(resCh chan<- any, host, network string) {
 
 // lookup performs necessary DNS lookups of host and returns all the valid
 // addresses from the answer section of the responses.
-func (r UpstreamResolver) lookup(host, network string) (ips []netip.Addr, err error) {
+func (r *UpstreamResolver) lookup(host, network string) (ips []netip.Addr, err error) {
 	switch network {
 	case "ip4", "ip6":
 		ips, err = r.resolve(host, network)

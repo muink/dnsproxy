@@ -390,7 +390,7 @@ func TestAddressToUpstream_StaticResolver(t *testing.T) {
 	_, dohPort, err := net.SplitHostPort(dohSrv.addr)
 	require.NoError(t, err)
 
-	badResolver := UpstreamResolver{Upstream: nil}
+	badResolver := &UpstreamResolver{Upstream: nil}
 
 	dotStamp := (&dnsstamps.ServerStamp{
 		ServerAddrStr: netip.AddrPortFrom(netutil.IPv4Localhost(), uint16(dotSrv.port)).String(),
