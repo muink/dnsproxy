@@ -55,7 +55,7 @@ func NewUpstreamResolver(resolverAddress string, opts *Options) (r *UpstreamReso
 
 	return &UpstreamResolver{
 		Upstream:   ups,
-		PreferIPv6: opts.PreferIPv6,
+		PreferIPv6: upsOpts.PreferIPv6,
 	}, validateBootstrap(ups)
 }
 
