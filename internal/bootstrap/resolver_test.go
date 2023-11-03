@@ -2,8 +2,8 @@ package bootstrap_test
 
 import (
 	"context"
-	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/AdguardTeam/dnsproxy/internal/bootstrap"
@@ -85,7 +85,8 @@ func TestLookupParallel(t *testing.T) {
 
 	t.Run("all_errors", func(t *testing.T) {
 		err := assert.AnError
-		wantErrMsg := fmt.Sprintf("all resolvers failed: 3 errors: %[1]q, %[1]q, %[1]q", err)
+		errStr := err.Error()
+		wantErrMsg := strings.Join([]string{errStr, errStr, errStr}, "\n")
 
 		r := &testResolver{
 			onLookupNetIP: func(_ context.Context, network, host string) ([]netip.Addr, error) {

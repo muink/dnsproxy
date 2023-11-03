@@ -55,7 +55,7 @@ func NewUpstreamResolver(resolverAddress string, opts *Options) (r *UpstreamReso
 
 	return &UpstreamResolver{
 		Upstream:   ups,
-		PreferIPv6: upsOpts.PreferIPv6,
+		PreferIPv6: opts.PreferIPv6,
 	}, validateBootstrap(ups)
 }
 
@@ -223,7 +223,7 @@ type StaticResolver []netip.Addr
 // type check
 var _ Resolver = StaticResolver(nil)
 
-// LookupNetIP implements the [Resolver] interface for ipSliceResolver.
+// LookupNetIP implements the [Resolver] interface for StaticResolver.
 func (r StaticResolver) LookupNetIP(
 	ctx context.Context,
 	network,
@@ -233,26 +233,26 @@ func (r StaticResolver) LookupNetIP(
 }
 
 // ConsequentResolver is a slice of resolvers that are queried in order until
-// the first successful response.
+// the first successful non-empty response.
 type ConsequentResolver []Resolver
 
 // type check
 var _ Resolver = ConsequentResolver(nil)
 
-// LookupNetIP implements the [Resolver] interface for consequentResolver.
-func (r ConsequentResolver) LookupNetIP(
+// LookupNetIP implements the [Resolver] interface for ConsequentResolver.
+func (resolvers ConsequentResolver) LookupNetIP(
 	ctx context.Context,
 	network,
 	host string,
 ) (addrs []netip.Addr, err error) {
-	if len(r) == 0 {
+	if len(resolvers) == 0 {
 		return nil, bootstrap.ErrNoResolvers
 	}
 
 	var errs []error
-	for _, res := range r {
-		addrs, err = res.LookupNetIP(ctx, network, host)
-		if err == nil {
+	for _, r := range resolvers {
+		addrs, err = r.LookupNetIP(ctx, network, host)
+		if err == nil && len(addrs) > 0 {
 			return addrs, nil
 		}
 

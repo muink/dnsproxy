@@ -13,7 +13,8 @@ import (
 // Resolver resolves the hostnames to IP addresses.
 type Resolver interface {
 	// LookupNetIP looks up the IP addresses for the given host.  network must
-	// be one of "ip", "ip4" or "ip6".
+	// be one of "ip", "ip4" or "ip6".  The response may appear empty even if
+	// err is nil.
 	LookupNetIP(ctx context.Context, network, host string) (addrs []netip.Addr, err error)
 }
 
@@ -24,7 +25,7 @@ var _ Resolver = &net.Resolver{}
 const ErrNoResolvers errors.Error = "no resolvers specified"
 
 // ParallelResolver is a slice of resolvers that are queried concurrently.  The
-// first successful response is returned.
+// first successful non-empty response is returned.
 type ParallelResolver []Resolver
 
 // type check
@@ -63,8 +64,7 @@ func (r ParallelResolver) LookupNetIP(
 		}
 	}
 
-	// TODO(e.burkov):  Use [errors.Join] in Go 1.20.
-	return nil, errors.List("all resolvers failed", errs...)
+	return nil, errors.Join(errs...)
 }
 
 // lookupAsync tries to lookup for ip of host with r and sends the result into
@@ -79,7 +79,7 @@ func lookupAsync(
 	defer log.OnPanic("parallel lookup")
 
 	addrs, err := lookup(ctx, r, network, host)
-	if err != nil {
+	if err != nil || len(addrs) == 0 {
 		resCh <- err
 	} else {
 		resCh <- addrs
